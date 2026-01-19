@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 3D Studio Pro</title>
+    <title>AI 3D Fast Studio</title>
     <style>
-        :root { --accent: #f57d00; --bg: #0a0a0a; --quest: #0084ff; }
-        body { margin: 0; background: var(--bg); color: #fff; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; padding: 20px; }
+        :root { --accent: #f57d00; --bg: #0a0a0a; }
+        body { margin: 0; background: var(--bg); color: #fff; font-family: sans-serif; display: flex; justify-content: center; padding: 20px; }
         #studio { width: 100%; max-width: 500px; text-align: center; }
         
-        /* The Preview Area */
+        /* Preview Area with Scanner */
         .preview-box { 
             width: 100%; min-height: 250px; background: #000; border-radius: 12px; 
             margin: 15px 0; border: 1px solid #333; overflow: hidden; position: relative;
@@ -18,66 +18,53 @@
         canvas, video { max-width: 100%; height: auto; display: block; }
 
         /* Scanning Animation */
-        #ai-loader { display: none; position: absolute; width: 100%; height: 100%; top: 0; left: 0; background: rgba(0,0,0,0.7); flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
-        .scanner { width: 80%; height: 2px; background: var(--accent); box-shadow: 0 0 15px var(--accent); position: absolute; animation: scan 2s infinite ease-in-out; }
-        @keyframes scan { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
-        .ai-text { margin-top: 40px; font-size: 14px; letter-spacing: 1px; color: var(--accent); font-weight: bold; }
+        #ai-loader { display: none; position: absolute; width: 100%; height: 100%; top: 0; left: 0; background: rgba(0,0,0,0.8); flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        .scanner { width: 90%; height: 3px; background: var(--accent); box-shadow: 0 0 20px var(--accent); position: absolute; animation: scan 1.5s infinite ease-in-out; }
+        @keyframes scan { 0% { top: 5%; } 50% { top: 95%; } 100% { top: 5%; } }
+        .ai-text { margin-top: 50px; font-family: monospace; color: var(--accent); font-weight: bold; }
 
-        .btn { background: var(--accent); color: #fff; border: none; padding: 16px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; text-transform: uppercase; transition: 0.3s; }
-        .btn:hover { opacity: 0.8; }
-        .btn-quest { background: var(--quest); display: none; }
+        .btn { background: var(--accent); color: #fff; border: none; padding: 16px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; text-transform: uppercase; }
         .btn-secondary { background: #222; margin-bottom: 5px; }
-        #status { font-size: 12px; color: #888; margin: 10px 0; height: 15px; }
+        #status { font-size: 12px; color: #888; margin: 10px 0; }
     </style>
 </head>
 <body>
 
 <div id="studio">
-    <h2 style="letter-spacing: 2px;">AI 3D <span style="color:var(--accent)">STUDIO</span></h2>
+    <h2>AI 3D <span style="color:var(--accent)">FAST STUDIO</span></h2>
     
     <input type="file" id="mediaInput" hidden accept="image/*,video/*">
-    <button class="btn btn-secondary" onclick="document.getElementById('mediaInput').click()">Pick Photo or Video</button>
+    <button class="btn btn-secondary" onclick="document.getElementById('mediaInput').click()">CHOOSE PHOTO OR VIDEO</button>
     
     <div class="preview-box">
         <div id="ai-loader">
             <div class="scanner"></div>
-            <div class="ai-text">AI DEPTH ANALYSIS...</div>
+            <div id="loader-text" class="ai-text">ANALYZING DEPTH...</div>
         </div>
-        
         <video id="raw-video" style="display:none" muted playsinline></video>
         <canvas id="main-cvs"></canvas>
     </div>
 
     <div id="status">Ready</div>
-    <button class="btn" id="goBtn">Convert to 3D</button>
-    <button class="btn btn-quest" id="questBtn">VIEW IN VR (QUEST)</button>
-    <button class="btn btn-secondary" id="dlBtn" style="display:none; margin-top:20px;">Download .MP4 3D</button>
+    <button class="btn" id="goBtn">START CONVERSION</button>
+    <button class="btn btn-secondary" id="dlBtn" style="display:none; margin-top:20px;">DOWNLOAD .MP4 3D</button>
 </div>
 
-<script type="importmap">
-    { "imports": { 
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "@ffmpeg/ffmpeg": "https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"
-    } }
-</script>
-
 <script type="module">
-    import * as THREE from 'three';
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-    
-    const { createFFmpeg, fetchFile } = FFmpeg;
-    const ffmpeg = createFFmpeg({ log: false });
 
     const loader = document.getElementById('ai-loader');
+    const lText = document.getElementById('loader-text');
     const mediaInput = document.getElementById('mediaInput');
     const vid = document.getElementById('raw-video');
     const cvs = document.getElementById('main-cvs');
     const ctx = cvs.getContext('2d', { willReadFrequently: true });
     const goBtn = document.getElementById('goBtn');
+    const dlBtn = document.getElementById('dlBtn');
 
     let aiEngine = null;
     let mode = 'image';
-    let chunks = [];
+    let videoBlobUrl = null;
 
     mediaInput.onchange = (e) => {
         const file = e.target.files[0];
@@ -93,6 +80,7 @@
             vid.src = url; vid.style.display = 'block'; cvs.style.display = 'none';
             vid.onloadedmetadata = () => { cvs.width = vid.videoWidth; cvs.height = vid.videoHeight; };
         }
+        dlBtn.style.display = 'none';
     };
 
     goBtn.onclick = async () => {
@@ -101,21 +89,58 @@
         if (!aiEngine) aiEngine = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf');
 
         if (mode === 'image') {
-            const img = new Image(); img.src = cvs.dataset.original;
-            img.onload = async () => {
-                const res = await aiEngine(img.src);
-                const depth = await res.depth.resize(img.width, img.height);
-                cvs.width = img.width * 2;
-                draw3D(img, depth, img.width, img.height);
-                finish();
-            };
+            processImage();
         } else {
-            await processVideo();
+            processVideo();
         }
     };
 
+    async function processImage() {
+        const img = new Image(); img.src = cvs.dataset.original;
+        img.onload = async () => {
+            const res = await aiEngine(img.src);
+            const depth = await res.depth.resize(img.width, img.height);
+            cvs.width = img.width * 2;
+            draw3D(img, depth, img.width, img.height);
+            finish();
+        };
+    }
+
+    async function processVideo() {
+        const w = vid.videoWidth; const h = vid.videoHeight;
+        cvs.width = w * 2; cvs.height = h;
+        cvs.style.display = 'block'; vid.style.display = 'none';
+
+        const stream = cvs.captureStream(24); // Output is 24fps
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+        const chunks = [];
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = () => {
+            videoBlobUrl = URL.createObjectURL(new Blob(chunks, { type: 'video/mp4' })); // Label as mp4 for XREAL compatibility
+            finish();
+        };
+        
+        recorder.start();
+        vid.currentTime = 0;
+        
+        // SPEED OPTIMIZATION: Process at 8fps (every 0.125s) to save time
+        const step = 0.125; 
+        while (vid.currentTime < vid.duration) {
+            const temp = document.createElement('canvas'); temp.width = w; temp.height = h;
+            temp.getContext('2d').drawImage(vid, 0, 0);
+            
+            const res = await aiEngine(temp.toDataURL('image/jpeg', 0.7));
+            draw3D(temp, await res.depth.resize(w, h), w, h);
+            
+            lText.innerText = `AI SCANNING: ${Math.round((vid.currentTime / vid.duration) * 100)}%`;
+            vid.currentTime += step;
+            await new Promise(r => vid.onseeked = r);
+        }
+        recorder.stop();
+    }
+
     function draw3D(source, depth, w, h) {
-        const intensity = 14;
+        const intensity = 15;
         const tempC = document.createElement('canvas');
         tempC.width = w; tempC.height = h;
         const tCtx = tempC.getContext('2d');
@@ -124,8 +149,8 @@
         const left = ctx.createImageData(w, h); const right = ctx.createImageData(w, h);
 
         for (let i = 0; i < w * h; i++) {
-            const x = i % w; const y = Math.floor(i / w);
             const shift = (depth.data[i] / 255) * intensity;
+            const x = i % w; const y = Math.floor(i / w);
             const lx = Math.max(0, Math.min(w - 1, Math.floor(x + shift/2)));
             const rx = Math.max(0, Math.min(w - 1, Math.floor(x - shift/2)));
             const oIdx = i * 4; const lIdx = (y * w + lx) * 4; const rIdx = (y * w + rx) * 4;
@@ -134,47 +159,17 @@
         ctx.putImageData(left, 0, 0); ctx.putImageData(right, w, 0);
     }
 
-    async function processVideo() {
-        cvs.style.display = 'block'; vid.style.display = 'none';
-        const w = vid.videoWidth; const h = vid.videoHeight;
-        cvs.width = w * 2; cvs.height = h;
-        chunks = [];
-        const stream = cvs.captureStream(24); // Force 24 FPS
-        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = async () => {
-            document.querySelector('.ai-text').innerText = "CONVERTING TO MP4...";
-            if (!ffmpeg.isLoaded()) await ffmpeg.load();
-            const webmBlob = new Blob(chunks, { type: 'video/webm' });
-            ffmpeg.FS('writeFile', 'input.webm', await fetchFile(webmBlob));
-            await ffmpeg.run('-i', 'input.webm', '-r', '24', 'output.mp4');
-            const data = ffmpeg.FS('readFile', 'output.mp4');
-            cvs.dataset.mp4 = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-            finish();
-        };
-        recorder.start();
-        vid.currentTime = 0;
-        while (vid.currentTime < vid.duration) {
-            const temp = document.createElement('canvas'); temp.width = w; temp.height = h;
-            temp.getContext('2d').drawImage(vid, 0, 0);
-            const res = await aiEngine(temp.toDataURL('image/jpeg'));
-            draw3D(temp, await res.depth.resize(w, h), w, h);
-            vid.currentTime += 0.5; // Processes every 0.5s for speed
-            await new Promise(r => vid.onseeked = r);
-        }
-        recorder.stop();
-    }
-
     function finish() {
         loader.style.display = 'none';
         goBtn.disabled = false;
-        document.getElementById('questBtn').style.display = document.getElementById('dlBtn').style.display = 'block';
+        dlBtn.style.display = 'block';
+        lText.innerText = "ANALYZING DEPTH...";
     }
 
-    document.getElementById('dlBtn').onclick = () => {
+    dlBtn.onclick = () => {
         const a = document.createElement('a');
-        a.href = mode === 'image' ? cvs.toDataURL() : cvs.dataset.mp4;
-        a.download = mode === 'image' ? "3D_SBS.png" : "3D_Video_24fps.mp4";
+        a.href = mode === 'image' ? cvs.toDataURL() : videoBlobUrl;
+        a.download = mode === 'image' ? "3D_PHOTO_SBS.png" : "3D_VIDEO_SBS.mp4";
         a.click();
     };
 </script>

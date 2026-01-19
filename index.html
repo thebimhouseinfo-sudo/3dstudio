@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 3D Studio - XREAL Edition</title>
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        #studio-container { background: #1a1a1a; padding: 25px; border-radius: 20px; width: 90%; max-width: 500px; text-align: center; border: 1px solid #333; }
+        .btn { background: #f57d00; color: #fff; border: none; padding: 15px 25px; border-radius: 10px; font-weight: bold; width: 100%; cursor: pointer; margin: 10px 0; }
+        .btn-vr { background: #673ab7; display: none; }
+        #canvas-preview { width: 100%; border-radius: 10px; margin-top: 15px; display: none; }
+        #status { color: #03a9f4; font-size: 14px; margin: 10px 0; }
+        
+        /* THE CRITICAL PART: Fullscreen styling for XREAL */
+        canvas:fullscreen { width: 100vw !important; height: 100vh !important; object-fit: contain; background: #000; }
+        canvas:-webkit-full-screen { width: 100vw !important; height: 100vh !important; object-fit: contain; background: #000; }
+    </style>
+</head>
+<body>
+
+<div id="studio-container">
+    <h2>AI 3D STUDIO</h2>
+    <p>Upload a photo to create a Spatial Image</p>
+    
+    <input type="file" id="fileInput" accept="image/*" style="display:none">
+    <button class="btn" onclick="document.getElementById('fileInput').click()">CHOOSE IMAGE</button>
+    
+    <div id="status">Waiting for image...</div>
+    
+    <button class="btn" id="convertBtn" style="display:none">START AI CONVERSION</button>
+    <button class="btn btn-vr" id="vrBtn">ENTER XREAL 3D MODE</button>
+
+    <canvas id="view-canvas"></canvas>
+</div>
+
+<script type="module">
+    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+
+    const fileInput = document.getElementById('fileInput');
+    const status = document.getElementById('status');
+    const convertBtn = document.getElementById('convertBtn');
+    const vrBtn = document.getElementById('vrBtn');
+    const canvas = document.getElementById('view-canvas');
+    const ctx = canvas.getContext('2d');
+
+    let aiEngine = null;
+    let originalImage = null;
+
+    fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            originalImage = new Image();
+            originalImage.src = URL.createObjectURL(file);
+            originalImage.onload = () => {
+                status.innerText = "Image loaded. Ready to convert.";
+                convertBtn.style.display = "block";
+                canvas.style.display = "block";
+                // Show a small preview
+                canvas.width = originalImage.width;
+                canvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+            };
+        }
+    };
+
+    convertBtn.onclick = async () => {
+        status.innerText = "Downloading AI Model (approx 30MB)...";
+        convertBtn.disabled = true;
+        
+        if (!aiEngine) {
+            aiEngine = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf');
+        }
+        
+        status.innerText = "Generating Depth Map...";
+        const result = await aiEngine(originalImage.src);
+        const depth = await result.depth.resize(originalImage.width, originalImage.height);
+        
+        status.innerText = "Creating 3D SBS View...";
+        renderSBS(originalImage, depth);
+        
+        status.innerText = "Done! Put on your XREALs and click below.";
+        vrBtn.style.display = "block";
+    };
+
+    function renderSBS(img, depth) {
+        const w = img.width;
+        const h = img.height;
+        const intensity = 15; // The 3D "pop" strength
+        
+        canvas.width = w * 2;
+        canvas.height = h;
+
+        // Draw original to get data
+        const tempC = document.createElement('canvas');
+        tempC.width = w; tempC.height = h;
+        const tCtx = tempC.getContext('2d');
+        tCtx.drawImage(img, 0, 0);
+        const imgData = tCtx.getImageData(0, 0, w, h);
+        
+        const left = ctx.createImageData(w, h);
+        const right = ctx.createImageData(w, h);
+
+        for (let i = 0; i < w * h; i++) {
+            const x = i % w;
+            const y = Math.floor(i / w);
+            const d = depth.data[i] / 255;
+            const shift = d * intensity;
+
+            const lx = Math.max(0, Math.min(w - 1, Math.floor(x + shift)));
+            const rx = Math.max(0, Math.min(w - 1, Math.floor(x - shift)));
+
+            const lIdx = (y * w + lx) * 4;
+            const rIdx = (y * w + rx) * 4;
+            const origIdx = i * 4;
+
+            for(let j=0; j<4; j++) {
+                left.data[origIdx+j] = imgData.data[lIdx+j];
+                right.data[origIdx+j] = imgData.data[rIdx+j];
+            }
+        }
+        ctx.putImageData(left, 0, 0);
+        ctx.putImageData(right, w, 0);
+    }
+
+    vrBtn.onclick = () => {
+        if (canvas.requestFullscreen) {
+            canvas.requestFullscreen().catch(err => {
+                alert("Fullscreen blocked. Please try on a standalone webpage (GitHub).");
+            });
+        } else if (canvas.webkitRequestFullscreen) {
+            canvas.webkitRequestFullscreen();
+        }
+    };
+</script>
+</body>
+</html>

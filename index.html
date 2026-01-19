@@ -3,161 +3,179 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 3D Studio - Universal</title>
+    <title>AI 3D Studio Pro</title>
     <style>
-        :root { --accent: #f57d00; --bg: #0a0a0a; --quest: #0084ff; --xreal: #673ab7; }
-        body { margin: 0; background: var(--bg); color: #fff; font-family: sans-serif; display: flex; justify-content: center; padding: 20px; }
-        #studio { width: 100%; max-width: 450px; text-align: center; }
-        .preview-box { width: 100%; height: 250px; background: #000; border-radius: 12px; margin: 15px 0; border: 1px solid #333; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-        canvas { max-width: 100%; max-height: 100%; }
+        :root { --accent: #f57d00; --bg: #0a0a0a; --quest: #0084ff; }
+        body { margin: 0; background: var(--bg); color: #fff; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; padding: 20px; }
+        #studio { width: 100%; max-width: 500px; text-align: center; }
         
-        .btn { background: var(--accent); color: #fff; border: none; padding: 15px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; text-transform: uppercase; }
-        .btn-xreal { background: var(--xreal); display: none; }
+        /* The Preview Area */
+        .preview-box { 
+            width: 100%; min-height: 250px; background: #000; border-radius: 12px; 
+            margin: 15px 0; border: 1px solid #333; overflow: hidden; position: relative;
+            display: flex; align-items: center; justify-content: center;
+        }
+        canvas, video { max-width: 100%; height: auto; display: block; }
+
+        /* Scanning Animation */
+        #ai-loader { display: none; position: absolute; width: 100%; height: 100%; top: 0; left: 0; background: rgba(0,0,0,0.7); flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        .scanner { width: 80%; height: 2px; background: var(--accent); box-shadow: 0 0 15px var(--accent); position: absolute; animation: scan 2s infinite ease-in-out; }
+        @keyframes scan { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
+        .ai-text { margin-top: 40px; font-size: 14px; letter-spacing: 1px; color: var(--accent); font-weight: bold; }
+
+        .btn { background: var(--accent); color: #fff; border: none; padding: 16px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; text-transform: uppercase; transition: 0.3s; }
+        .btn:hover { opacity: 0.8; }
         .btn-quest { background: var(--quest); display: none; }
-        .btn-secondary { background: #333; }
-        
-        #status { font-size: 13px; color: #03a9f4; margin: 10px 0; min-height: 20px; }
-        #xreal-output { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 9999; }
-        #xreal-output canvas { width: 100%; height: 100%; object-fit: contain; }
+        .btn-secondary { background: #222; margin-bottom: 5px; }
+        #status { font-size: 12px; color: #888; margin: 10px 0; height: 15px; }
     </style>
 </head>
 <body>
 
 <div id="studio">
-    <h2>AI 3D <span style="color:var(--accent)">STUDIO</span></h2>
-    <input type="file" id="fileInput" hidden accept="image/*">
-    <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">Pick 2D Photo</button>
+    <h2 style="letter-spacing: 2px;">AI 3D <span style="color:var(--accent)">STUDIO</span></h2>
+    
+    <input type="file" id="mediaInput" hidden accept="image/*,video/*">
+    <button class="btn btn-secondary" onclick="document.getElementById('mediaInput').click()">Pick Photo or Video</button>
     
     <div class="preview-box">
+        <div id="ai-loader">
+            <div class="scanner"></div>
+            <div class="ai-text">AI DEPTH ANALYSIS...</div>
+        </div>
+        
+        <video id="raw-video" style="display:none" muted playsinline></video>
         <canvas id="main-cvs"></canvas>
     </div>
 
     <div id="status">Ready</div>
     <button class="btn" id="goBtn">Convert to 3D</button>
-    
-    <button class="btn btn-xreal" id="xrealBtn">FULL REVIEW (XREAL)</button>
-    
     <button class="btn btn-quest" id="questBtn">VIEW IN VR (QUEST)</button>
-    
-    <button class="btn btn-secondary" id="dlBtn" style="display:none;">Download SBS Image</button>
-</div>
-
-<div id="xreal-output" onclick="exitFullscreen()">
-    <canvas id="sbs-final"></canvas>
+    <button class="btn btn-secondary" id="dlBtn" style="display:none; margin-top:20px;">Download .MP4 3D</button>
 </div>
 
 <script type="importmap">
-    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    { "imports": { 
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "@ffmpeg/ffmpeg": "https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"
+    } }
 </script>
 
 <script type="module">
     import * as THREE from 'three';
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+    
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: false });
 
-    const fileInput = document.getElementById('fileInput');
-    const mainCvs = document.getElementById('main-cvs');
-    const sbsFinal = document.getElementById('sbs-final');
-    const status = document.getElementById('status');
-    const xrealBtn = document.getElementById('xrealBtn');
-    const questBtn = document.getElementById('questBtn');
+    const loader = document.getElementById('ai-loader');
+    const mediaInput = document.getElementById('mediaInput');
+    const vid = document.getElementById('raw-video');
+    const cvs = document.getElementById('main-cvs');
+    const ctx = cvs.getContext('2d', { willReadFrequently: true });
+    const goBtn = document.getElementById('goBtn');
 
     let aiEngine = null;
-    let originalImg = null;
+    let mode = 'image';
+    let chunks = [];
 
-    fileInput.onchange = (e) => {
+    mediaInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        originalImg = new Image();
-        originalImg.src = URL.createObjectURL(file);
-        originalImg.onload = () => {
-            mainCvs.width = originalImg.width;
-            mainCvs.height = originalImg.height;
-            mainCvs.getContext('2d').drawImage(originalImg, 0, 0);
-        };
+        mode = file.type.startsWith('image') ? 'image' : 'video';
+        const url = URL.createObjectURL(file);
+        
+        if (mode === 'image') {
+            const img = new Image(); img.src = url;
+            img.onload = () => { cvs.width = img.width; cvs.height = img.height; ctx.drawImage(img, 0, 0); cvs.dataset.original = url; };
+            vid.style.display = 'none'; cvs.style.display = 'block';
+        } else {
+            vid.src = url; vid.style.display = 'block'; cvs.style.display = 'none';
+            vid.onloadedmetadata = () => { cvs.width = vid.videoWidth; cvs.height = vid.videoHeight; };
+        }
     };
 
-    document.getElementById('goBtn').onclick = async () => {
-        status.innerText = "Processing AI Depth...";
+    goBtn.onclick = async () => {
+        loader.style.display = 'flex';
+        goBtn.disabled = true;
         if (!aiEngine) aiEngine = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf');
-        
-        const result = await aiEngine(originalImg.src);
-        const depth = await result.depth.resize(originalImg.width, originalImg.height);
-        
-        generateSBS(originalImg, depth);
-        
-        status.innerText = "3D Ready!";
-        xrealBtn.style.display = "block";
-        questBtn.style.display = "block";
-        document.getElementById('dlBtn').style.display = "block";
+
+        if (mode === 'image') {
+            const img = new Image(); img.src = cvs.dataset.original;
+            img.onload = async () => {
+                const res = await aiEngine(img.src);
+                const depth = await res.depth.resize(img.width, img.height);
+                cvs.width = img.width * 2;
+                draw3D(img, depth, img.width, img.height);
+                finish();
+            };
+        } else {
+            await processVideo();
+        }
     };
 
-    function generateSBS(img, depth) {
-        const w = img.width; const h = img.height;
-        sbsFinal.width = 3840; sbsFinal.height = 1080;
-        const fCtx = sbsFinal.getContext('2d');
-        
-        // 3D Logic: Shift pixels based on depth map
+    function draw3D(source, depth, w, h) {
+        const intensity = 14;
         const tempC = document.createElement('canvas');
         tempC.width = w; tempC.height = h;
         const tCtx = tempC.getContext('2d');
-        tCtx.drawImage(img, 0, 0);
+        tCtx.drawImage(source, 0, 0);
         const srcData = tCtx.getImageData(0, 0, w, h);
-        const left = fCtx.createImageData(w, h);
-        const right = fCtx.createImageData(w, h);
+        const left = ctx.createImageData(w, h); const right = ctx.createImageData(w, h);
 
         for (let i = 0; i < w * h; i++) {
-            const shift = (depth.data[i] / 255) * 15;
             const x = i % w; const y = Math.floor(i / w);
-            const lx = Math.max(0, Math.min(w - 1, Math.floor(x + shift)));
-            const rx = Math.max(0, Math.min(w - 1, Math.floor(x - shift)));
-            const oIdx = i * 4;
-            const lIdx = (y * w + lx) * 4; const rIdx = (y * w + rx) * 4;
-            for(let j=0; j<4; j++) {
-                left.data[oIdx+j] = srcData.data[lIdx+j];
-                right.data[oIdx+j] = srcData.data[rIdx+j];
-            }
+            const shift = (depth.data[i] / 255) * intensity;
+            const lx = Math.max(0, Math.min(w - 1, Math.floor(x + shift/2)));
+            const rx = Math.max(0, Math.min(w - 1, Math.floor(x - shift/2)));
+            const oIdx = i * 4; const lIdx = (y * w + lx) * 4; const rIdx = (y * w + rx) * 4;
+            for(let j=0; j<4; j++) { left.data[oIdx+j] = srcData.data[lIdx+j]; right.data[oIdx+j] = srcData.data[rIdx+j]; }
         }
-        
-        const cL = document.createElement('canvas'); cL.width = w; cL.height = h;
-        cL.getContext('2d').putImageData(left, 0, 0);
-        const cR = document.createElement('canvas'); cR.width = w; cR.height = h;
-        cR.getContext('2d').putImageData(right, 0, 0);
-
-        fCtx.fillStyle = "black"; fCtx.fillRect(0, 0, 3840, 1080);
-        fCtx.drawImage(cL, 0, 0, w, h, 0, 0, 1920, 1080);
-        fCtx.drawImage(cR, 0, 0, w, h, 1920, 0, 1920, 1080);
+        ctx.putImageData(left, 0, 0); ctx.putImageData(right, w, 0);
     }
 
-    // --- XREAL MODE (HARDWARE SBS) ---
-    xrealBtn.onclick = () => {
-        const out = document.getElementById('xreal-output');
-        out.style.display = "block";
-        out.requestFullscreen?.() || out.webkitRequestFullscreen?.();
-    };
+    async function processVideo() {
+        cvs.style.display = 'block'; vid.style.display = 'none';
+        const w = vid.videoWidth; const h = vid.videoHeight;
+        cvs.width = w * 2; cvs.height = h;
+        chunks = [];
+        const stream = cvs.captureStream(24); // Force 24 FPS
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = async () => {
+            document.querySelector('.ai-text').innerText = "CONVERTING TO MP4...";
+            if (!ffmpeg.isLoaded()) await ffmpeg.load();
+            const webmBlob = new Blob(chunks, { type: 'video/webm' });
+            ffmpeg.FS('writeFile', 'input.webm', await fetchFile(webmBlob));
+            await ffmpeg.run('-i', 'input.webm', '-r', '24', 'output.mp4');
+            const data = ffmpeg.FS('readFile', 'output.mp4');
+            cvs.dataset.mp4 = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+            finish();
+        };
+        recorder.start();
+        vid.currentTime = 0;
+        while (vid.currentTime < vid.duration) {
+            const temp = document.createElement('canvas'); temp.width = w; temp.height = h;
+            temp.getContext('2d').drawImage(vid, 0, 0);
+            const res = await aiEngine(temp.toDataURL('image/jpeg'));
+            draw3D(temp, await res.depth.resize(w, h), w, h);
+            vid.currentTime += 0.5; // Processes every 0.5s for speed
+            await new Promise(r => vid.onseeked = r);
+        }
+        recorder.stop();
+    }
 
-    window.exitFullscreen = () => {
-        document.exitFullscreen?.();
-        document.getElementById('xreal-output').style.display = "none";
-    };
+    function finish() {
+        loader.style.display = 'none';
+        goBtn.disabled = false;
+        document.getElementById('questBtn').style.display = document.getElementById('dlBtn').style.display = 'block';
+    }
 
-    // --- QUEST MODE (WEBXR) ---
-    questBtn.onclick = async () => {
-        if (!navigator.xr) return alert("WebXR not found. Use Meta Quest Browser.");
-        
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.xr.enabled = true;
-
-        const texture = new THREE.CanvasTexture(sbsFinal);
-        const material = new THREE.MeshBasicMaterial({ map: texture });
-        const screen = new THREE.Mesh(new THREE.PlaneGeometry(4, 1.12), material);
-        screen.position.set(0, 1.6, -3);
-        scene.add(screen);
-
-        const session = await navigator.xr.requestSession('immersive-vr');
-        renderer.xr.setSession(session);
-        renderer.setAnimationLoop(() => renderer.render(scene, camera));
+    document.getElementById('dlBtn').onclick = () => {
+        const a = document.createElement('a');
+        a.href = mode === 'image' ? cvs.toDataURL() : cvs.dataset.mp4;
+        a.download = mode === 'image' ? "3D_SBS.png" : "3D_Video_24fps.mp4";
+        a.click();
     };
 </script>
 </body>

@@ -1,68 +1,69 @@
-<!doctype html>
-
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XREAL AI 3D Studio Pro</title>
     <style>
-        :root { --accent: #f57d00; --bg: #0f0f0f; }
-        body { margin: 0; background: var(--bg); color: #fff; font-family: -apple-system, sans-serif; display: flex; justify-content: center; min-height: 100vh; overflow-x: hidden; }
+        :root { --accent: #f57d00; --bg: #0f0f0f; --card: #1a1a1a; }
+        body { margin: 0; background: var(--bg); color: #fff; font-family: -apple-system, sans-serif; display: flex; justify-content: center; min-height: 100vh; }
         #studio-container { width: 95%; max-width: 500px; padding: 20px; text-align: center; }
         
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-        .tab { flex: 1; padding: 12px; background: #222; border-radius: 10px; cursor: pointer; font-size: 0.9rem; font-weight: bold; }
-        .tab.active { background: var(--accent); }
-
         .preview-box { 
-            width: 100%; max-height: 300px; background: #000; border-radius: 15px; 
+            width: 100%; height: 250px; background: #000; border-radius: 15px; 
             margin: 15px 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
-            border: 1px dashed #444;
+            border: 1px dashed #444; position: relative;
         }
-        /* This scales the preview down to fit your phone screen */
         canvas, video { max-width: 100%; max-height: 100%; object-fit: contain; }
 
-        .btn { background: var(--accent); color: #fff; border: none; padding: 15px; border-radius: 12px; font-weight: bold; width: 100%; cursor: pointer; margin: 5px 0; text-transform: uppercase; }
+        .btn { background: var(--accent); color: #fff; border: none; padding: 15px; border-radius: 12px; font-weight: bold; width: 100%; cursor: pointer; margin: 5px 0; text-transform: uppercase; transition: 0.2s; }
+        .btn:disabled { background: #444; cursor: not-allowed; }
         .btn-vr { background: #673ab7; display: none; }
         .btn-download { background: #333; display: none; }
         
-        #status { color: #03a9f4; font-size: 13px; margin: 10px 0; font-weight: 600; }
+        #status { color: #03a9f4; font-size: 13px; margin: 10px 0; font-weight: 600; min-height: 18px; }
         .progress-bg { width: 100%; height: 6px; background: #222; border-radius: 3px; display: none; margin: 10px 0; }
-        #progress-bar { width: 0%; height: 100%; background: #4caf50; border-radius: 3px; transition: width 0.1s; }
-
-        /* XREAL Fullscreen Mode */
-        canvas:fullscreen { width: 100vw !important; height: 100vh !important; object-fit: contain; background: #000; }
+        #progress-bar { width: 0%; height: 100%; background: #4caf50; border-radius: 3px; }
     </style>
-
-
+</head>
+<body>
 
 <div id="studio-container">
-    <h2 style="letter-spacing: 2px;">AI 3D <span style="color:var(--accent)">STUDIO</span></h2>
+    <h2 style="letter-spacing: 2px;">AI 3D <span style="color:var(--accent)">STUDIO PRO</span></h2>
     
-    <div class="tabs">
-        <div class="tab active" id="tab-img" onclick="setMode('image')">IMAGE</div>
-        <div class="tab" id="tab-vid" onclick="setMode('video')">VIDEO</div>
-    </div>
-
-    <input type="file" id="mediaInput" style="display:none" />
-    <button class="btn" style="background:#333" onclick="document.getElementById('mediaInput').click()">Select Media</button>
+    <input type="file" id="mediaInput" style="display:none" accept="image/*,video/*">
+    <button class="btn" style="background:#222" onclick="document.getElementById('mediaInput').click()">Select Photo or Video</button>
     
     <div class="preview-box">
         <video id="raw-video" style="display:none" muted playsinline></video>
         <canvas id="view-canvas"></canvas>
     </div>
 
-    <div id="status">Ready</div>
+    <div id="status">Ready to start</div>
     <div class="progress-bg" id="prog-wrap"><div id="progress-bar"></div></div>
     
     <button class="btn" id="goBtn">Start 3D Conversion</button>
-    <button class="btn btn-vr" id="vrBtn">View in XREAL (3D Mode)</button>
-    <button class="btn btn-download" id="dlBtn">Download 3D File</button>
+    <button class="btn btn-vr" id="vrBtn">Enter Actual VR Mode</button>
+    <button class="btn btn-download" id="dlBtn">Download 3D Media</button>
 </div>
 
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+</script>
+
 <script type="module">
+    import * as THREE from 'three';
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-    let mode = 'image';
     let aiEngine = null;
-    let recorder = null;
+    let mode = 'image';
     let chunks = [];
+    let recorder = null;
 
     const mediaInput = document.getElementById('mediaInput');
     const vid = document.getElementById('raw-video');
@@ -73,20 +74,12 @@
     const dlBtn = document.getElementById('dlBtn');
     const goBtn = document.getElementById('goBtn');
 
-    window.setMode = (m) => {
-        mode = m;
-        document.getElementById('tab-img').className = m === 'image' ? 'tab active' : 'tab';
-        document.getElementById('tab-vid').className = m === 'video' ? 'tab active' : 'tab';
-        mediaInput.accept = m === 'image' ? 'image/*' : 'video/*';
-        vrBtn.style.display = dlBtn.style.display = 'none';
-        status.innerText = `Switched to ${m} mode`;
-    };
-
     mediaInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        status.innerText = "File loaded: " + file.name;
+        mode = file.type.startsWith('image') ? 'image' : 'video';
         const url = URL.createObjectURL(file);
+        
         if (mode === 'image') {
             const img = new Image();
             img.src = url;
@@ -99,11 +92,12 @@
             vid.src = url;
             vid.onloadedmetadata = () => { cvs.width = vid.videoWidth; cvs.height = vid.videoHeight; };
         }
+        status.innerText = `Loaded ${mode}. Ready to convert.`;
     };
 
     goBtn.onclick = async () => {
         goBtn.disabled = true;
-        status.innerText = "Loading AI Engine (Depth-Anything)...";
+        status.innerText = "Loading AI Intelligence...";
         if (!aiEngine) aiEngine = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf');
 
         if (mode === 'image') {
@@ -112,9 +106,11 @@
             img.onload = async () => {
                 const res = await aiEngine(img.src);
                 const depth = await res.depth.resize(img.width, img.height);
-                cvs.width = img.width * 2; // Expand for SBS
+                cvs.width = img.width * 2;
                 draw3D(img, depth, img.width, img.height);
-                finishUp();
+                status.innerText = "3D Conversion Done!";
+                vrBtn.style.display = dlBtn.style.display = 'block';
+                goBtn.disabled = false;
             };
         } else {
             processVideo();
@@ -160,9 +156,10 @@
         recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
         recorder.ondataavailable = e => chunks.push(e.data);
         recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            cvs.dataset.blob = URL.createObjectURL(blob);
-            finishUp();
+            cvs.dataset.blob = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+            status.innerText = "Video 3D Ready!";
+            vrBtn.style.display = dlBtn.style.display = 'block';
+            goBtn.disabled = false;
         };
         recorder.start();
         vid.currentTime = 0;
@@ -174,29 +171,44 @@
             const res = await aiEngine(temp.toDataURL('image/jpeg'));
             const dep = await res.depth.resize(w, h);
             draw3D(temp, dep, w, h);
-            
             document.getElementById('progress-bar').style.width = (vid.currentTime / vid.duration * 100) + "%";
-            vid.currentTime += 0.2; // Convert 5 frames per second for speed
+            vid.currentTime += 0.25; 
             await new Promise(r => vid.onseeked = r);
         }
         recorder.stop();
-    }
-
-    function finishUp() {
-        status.innerText = "3D Conversion Successful!";
-        goBtn.disabled = false;
-        vrBtn.style.display = dlBtn.style.display = 'block';
         document.getElementById('prog-wrap').style.display = 'none';
     }
 
-    vrBtn.onclick = () => cvs.requestFullscreen();
-    
+    // ACTUAL VR MODE (THREE.JS WEBXR)
+    vrBtn.onclick = async () => {
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const texture = new THREE.CanvasTexture(cvs);
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        const geometry = new THREE.PlaneGeometry(4, 2);
+        const screen = new THREE.Mesh(geometry, material);
+        screen.position.set(0, 1.6, -3);
+        scene.add(screen);
+
+        if (navigator.xr) {
+            const session = await navigator.xr.requestSession('immersive-vr');
+            renderer.xr.setSession(session);
+            renderer.setAnimationLoop(() => renderer.render(scene, camera));
+        } else {
+            alert("WebXR not supported. Use Nebula Browser.");
+        }
+    };
+
     dlBtn.onclick = () => {
         const a = document.createElement('a');
         a.href = mode === 'image' ? cvs.toDataURL() : cvs.dataset.blob;
-        a.download = mode === 'image' ? "3D_Photo.png" : "3D_Video.webm";
+        a.download = mode === 'image' ? "3D_Photo_SBS.png" : "3D_Video_SBS.webm";
         a.click();
     };
 </script>
-
-</!doctype>
+</body>
+</html>
